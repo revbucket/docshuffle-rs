@@ -1,3 +1,4 @@
+use std::fs;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::AtomicUsize;
 use std::io::Write;
@@ -45,9 +46,10 @@ struct ArgParser {
     num_local_cells: usize,
 
     #[arg(long, default_value_t=50000)]
-    docs_per_jsonl: usize
+    docs_per_jsonl: usize,
 
-
+    #[arg(long)]
+    remove_locals: bool
 
 }
 
@@ -96,12 +98,16 @@ fn build_local_mappers(mapper_loc: &PathBuf, num_local_cells: usize) -> (Vec<Arc
 }
 
 
-fn coarse_shuffle(input_paths: &Vec<PathBuf>, local_cell_storage: &PathBuf, num_local_cells: usize) -> Result<Vec<PathBuf>, Error> {
+fn coarse_shuffle(input_paths: &Vec<PathBuf>, local_cell_storage: &PathBuf, num_local_cells: usize, remove_locals: bool) -> Result<Vec<PathBuf>, Error> {
     let (writers, filenames) = build_local_mappers(local_cell_storage, num_local_cells);
     let pbar = build_pbar(input_paths.len(), "Paths");
     input_paths.par_iter()
         .for_each(|p| {
             coarse_shuffle_single(p, &writers).unwrap();
+
+            if remove_locals {
+                fs::remove_file(p.clone()).unwrap();
+            }
             pbar.inc(1);
     });
 
@@ -129,7 +135,7 @@ fn coarse_shuffle_single(path: &PathBuf, writers: &Vec<Arc<Mutex<BufWriter<File>
 =                            FINE-SHUFFLE.                        =
 =================================================================*/
 
-fn finalize_chunks(filenames: Vec<PathBuf>, output: &PathBuf, docs_per_jsonl: usize) -> Result<usize, Error> {
+fn finalize_chunks(filenames: Vec<PathBuf>, output: &PathBuf, docs_per_jsonl: usize, remove_locals: bool) -> Result<usize, Error> {
     let pbar = build_pbar(filenames.len(), "Local Cells");
     let counter = AtomicUsize::new(0);
     let output_file_count = AtomicUsize::new(0);
@@ -146,6 +152,9 @@ fn finalize_chunks(filenames: Vec<PathBuf>, output: &PathBuf, docs_per_jsonl: us
             }
             if chunk.len() > 0 {
                 write_chunk(chunk, &output, &counter, &output_file_count).unwrap();
+            }
+            if remove_locals {
+                fs::remove_file(filename.clone()).unwrap();
             }
             pbar.inc(1);
         });
@@ -173,12 +182,12 @@ fn main() {
 
     println!("Starting coarse shuffle...");
     let start_coarse = Instant::now();
-    let local_cells = coarse_shuffle(&paths, &args.local_cell_storage, args.num_local_cells).unwrap();
+    let local_cells = coarse_shuffle(&paths, &args.local_cell_storage, args.num_local_cells, args.remove_locals).unwrap();
     println!("Finished coarse shuffle in {:?} secs", start_coarse.elapsed().as_secs());
 
     println!("Writing chunks...)");
     let start_chunks = Instant::now();
-    let num_output_files = finalize_chunks(local_cells, &args.output, args.docs_per_jsonl).unwrap();
+    let num_output_files = finalize_chunks(local_cells, &args.output, args.docs_per_jsonl, args.remove_locals).unwrap();
     println!("Finished writing chunks in {:?} secs", start_chunks.elapsed().as_secs());
 
     println!("-------------------------");
