@@ -1,3 +1,5 @@
+use rand::thread_rng;
+use rand::prelude::SliceRandom;
 use std::fs;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::AtomicUsize;
@@ -142,15 +144,9 @@ fn finalize_chunks(filenames: Vec<PathBuf>, output: &PathBuf, docs_per_jsonl: us
     filenames.par_iter()
         .for_each(|filename| {
             let contents = read_pathbuf_to_mem(&filename).unwrap();
-            let mut chunk: Vec<String> = Vec::new();
-            for line in contents.lines() {
-                let line = line.unwrap();
-                chunk.push(line);
-                if chunk.len() >= docs_per_jsonl {
-                    chunk = write_chunk(chunk, &output, &counter, &output_file_count).unwrap();
-                }
-            }
-            if chunk.len() > 0 {
+            let mut lines: Vec<String> = contents.lines().map(|line| line.unwrap()).collect();
+            lines.shuffle(&mut thread_rng());
+            for chunk in lines.chunks(docs_per_jsonl) {
                 write_chunk(chunk, &output, &counter, &output_file_count).unwrap();
             }
             if remove_locals {
@@ -162,7 +158,8 @@ fn finalize_chunks(filenames: Vec<PathBuf>, output: &PathBuf, docs_per_jsonl: us
     Ok(output_file_count.into_inner())
 }
 
-fn write_chunk(chunk: Vec<String>, output: &PathBuf, counter: &AtomicUsize, output_counter: &AtomicUsize) -> Result<Vec<String>, Error> {
+
+fn write_chunk(chunk: &[String], output: &PathBuf, counter: &AtomicUsize, output_counter: &AtomicUsize) -> Result<Vec<String>, Error> {
     let output_path = output.clone().join(format!("shuffled_doc_{:08}.jsonl.gz", counter.fetch_add(1, Ordering::SeqCst)));
     output_counter.fetch_add(1, Ordering::SeqCst);
     let contents = chunk.join("\n").into_bytes();
