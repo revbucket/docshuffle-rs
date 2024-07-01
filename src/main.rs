@@ -125,7 +125,8 @@ fn coarse_shuffle_single(path: &PathBuf, writers: &Vec<Arc<Mutex<BufWriter<File>
     let mut rng = rand::thread_rng();
     for line in contents.lines() {
         let line = line.unwrap();
-        let line = line.into_bytes();
+        let mut line = line.into_bytes();
+        line.push(b'\n');
         let idx = rng.gen::<usize>() as usize % num_local_cells;
         writers[idx].lock().unwrap().write_all(&line).unwrap();
     }
@@ -162,7 +163,10 @@ fn finalize_chunks(filenames: Vec<PathBuf>, output: &PathBuf, docs_per_jsonl: us
 fn write_chunk(chunk: &[String], output: &PathBuf, counter: &AtomicUsize, output_counter: &AtomicUsize) -> Result<Vec<String>, Error> {
     let output_path = output.clone().join(format!("shuffled_doc_{:08}.jsonl.gz", counter.fetch_add(1, Ordering::SeqCst)));
     output_counter.fetch_add(1, Ordering::SeqCst);
-    let contents = chunk.join("\n").into_bytes();
+    let contents: Vec<u8> = chunk.iter()
+                   .flat_map(|s| s.as_bytes().iter().chain(std::iter::once(&b'\n')))
+                   .cloned()
+                   .collect();
 
     write_mem_to_pathbuf(&contents, &output_path).unwrap();
     Ok(Vec::new())
